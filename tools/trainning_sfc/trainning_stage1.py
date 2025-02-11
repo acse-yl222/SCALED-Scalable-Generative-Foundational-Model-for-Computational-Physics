@@ -25,28 +25,132 @@ from diffusers.utils.import_utils import is_xformers_available
 from omegaconf import OmegaConf
 from scaled.model.unets.unet_1ds import UNet1DsModel
 from tqdm.auto import tqdm
-from scaled.pipelines.pipline_ddim_scaled_urbanflow import SCALEDUrbanFlowPipeline
+from scaled.pipelines.pipline_ddim_scaled_sfc import SCALEDSFCPipeline
 from scaled.utils.util import import_filename,seed_everything
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+import numpy as np
 import matplotlib.pyplot as plt
 import sys
 import os
-import numpy as np
-from scaled.utils.util import tools
-import matplotlib.gridspec as gridspec
-import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
-import numpy as np
-import bitsandbytes
-
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../scaled')))
 warnings.filterwarnings("ignore")
 check_min_version("0.10.0.dev0")
 logger = get_logger(__name__, log_level="INFO")
 
+import random
+
+
+def log_validation(
+        denoising_unet,
+        scheduler,
+        accelerator,
+        generator=None,
+        valid_dataset=None
+):
+    logger.info("Running validation... ")
+    if generator is None:
+        generator = torch.manual_seed(42)
+    dataset_len = len(valid_dataset)
+    sample_idx = [random.randint(0, dataset_len) for _ in range(1)]
+
+    pipe = SCALEDSFCPipeline(
+        denoising_unet,
+        scheduler=scheduler,
+    )
+    pipe = pipe.to(accelerator.device)
+    results = {}
+    ori_data, gt_result = valid_dataset[sample_idx[0]] # condition （9x32x32x32） gt_result (9x32x32x32)
+    previous_value = ori_data.unsqueeze(0)
+    next_value = gt_result.unsqueeze(0)
+    pre_particle = pipe(
+        previous_value,
+        num_inference_steps=25,
+        guidance_scale=0,
+        length=20560,
+        generator=generator,
+        return_dict=False,
+    )
+    results['WithoutBackground'] = {
+        "prediction_flow": pre_particle.detach().cpu().numpy()[0],
+        "gt_flow": next_value.detach().cpu().numpy()[0],
+        "original_flow": previous_value.detach().cpu().numpy()[0]
+    }
+    del pipe
+    return results
+
+def visualize_with_diff(data_pre, data_gt, data_ori, filename):
+    # Create a figure with a larger size and higher resolution
+    fig = plt.figure(figsize=(24, 24), dpi=300)  # Adjust figsize to accommodate diff images
+    gs = gridspec.GridSpec(4, 4, width_ratios=[1, 1, 1, 0.1])  # Add extra row for diff and column for colorbars
+    
+    for i in range(3):
+        ax1 = plt.subplot(gs[i, 0])
+        im1 = ax1.imshow(data_pre[i, 4], vmin=-1, vmax=1)
+        ax1.set_title('Prediction')
+        ax1.axis('off')
+        
+        ax2 = plt.subplot(gs[i, 1])
+        im2 = ax2.imshow(data_gt[i, 4], vmin=-1, vmax=1)
+        ax2.set_title('Ground Truth')
+        ax2.axis('off')
+        
+        ax3 = plt.subplot(gs[i, 2])
+        im3 = ax3.imshow(data_ori[i, 4], vmin=-1, vmax=1)
+        ax3.set_title('Original Data')
+        ax3.axis('off')
+        
+        # Add colorbars in the 4th column
+        cbar_ax1 = plt.subplot(gs[i, 3])
+        fig.colorbar(im1, cax=cbar_ax1)
+        
+        cbar_ax2 = plt.subplot(gs[i, 3])
+        fig.colorbar(im2, cax=cbar_ax2)
+        
+        cbar_ax3 = plt.subplot(gs[i, 3])
+        fig.colorbar(im3, cax=cbar_ax3)
+    
+    # Now plot the differences in the 4th row
+    diff_pre_gt = np.abs(data_pre - data_gt)  # Difference between Prediction and Ground Truth
+    diff_pre_ori = np.abs(data_pre - data_ori)  # Difference between Prediction and Original
+    diff_gt_ori = np.abs(data_gt - data_ori)  # Difference between Ground Truth and Original
+    
+    ax4 = plt.subplot(gs[3, 0])
+    im4 = ax4.imshow(diff_pre_gt[0, 4], vmin=0, vmax=0.25)
+    ax4.set_title('Diff Pre-GT')
+    ax4.axis('off')
+    
+    ax5 = plt.subplot(gs[3, 1])
+    im5 = ax5.imshow(diff_pre_ori[0, 4], vmin=0, vmax=0.25)
+    ax5.set_title('Diff Pre-Ori')
+    ax5.axis('off')
+    
+    ax6 = plt.subplot(gs[3, 2])
+    im6 = ax6.imshow(diff_gt_ori[0, 4], vmin=0, vmax=0.25)
+    ax6.set_title('Diff GT-Ori')
+    ax6.axis('off')
+    
+    # Add colorbars for the differences
+    cbar_ax4 = plt.subplot(gs[3, 3])
+    fig.colorbar(im4, cax=cbar_ax4)
+    
+    cbar_ax5 = plt.subplot(gs[3, 3])
+    fig.colorbar(im5, cax=cbar_ax5)
+    
+    cbar_ax6 = plt.subplot(gs[3, 3])
+    fig.colorbar(im6, cax=cbar_ax6)
+    
+    # Adjust layout to avoid overlap
+    plt.tight_layout()
+    
+    # Save the figure with higher resolution
+    plt.savefig(filename, dpi=300)
+    plt.close(fig)
+
 class Net(nn.Module):
     def __init__(
             self,
-            denoising_unet: UNet3DsModel,
+            denoising_unet: UNet1DsModel,
     ):
         super().__init__()
         self.denoising_unet = denoising_unet
@@ -84,8 +188,6 @@ def compute_snr(noise_scheduler, timesteps):
     sigma = sqrt_one_minus_alphas_cumprod.expand(timesteps.shape)
     snr = (alpha / sigma) ** 2
     return snr
-
-
 
 def main(cfg):
     kwargs = DistributedDataParallelKwargs(find_unused_parameters=False)
@@ -143,7 +245,7 @@ def main(cfg):
     train_noise_scheduler = DDIMScheduler(**sched_kwargs)
 
     denoising_unet  = UNet1DsModel(
-        in_channels=2,
+        in_channels=4,
         out_channels=2,
         down_block_types=("DownBlock1D", "DownBlock1D", "DownBlock1D", "DownBlock1D"),
         up_block_types=("UpBlock1D", "UpBlock1D", "UpBlock1D", "UpBlock1D"),
@@ -199,10 +301,10 @@ def main(cfg):
 
     train_dataset = SFCDataset(
         data_dir="data/csv_data",
-        time_steps_list=[i for i in range(0, 800)])
+        data_list=[i for i in range(0, 800)])
     val_dataset  = SFCDataset(
         data_dir="data/csv_data",
-        time_steps_list=[i for i in range(800,1000)])
+        data_list=[i for i in range(800,1000)])
 
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
@@ -271,7 +373,7 @@ def main(cfg):
         dirs_ = os.listdir(resume_dir)
         dirs = [d for d in dirs_ if d.startswith("denoising_unet")]
         dirs = sorted(dirs, key=lambda x: int(x.split("-")[1][:-4]))
-        path = dirs[-1]
+        path = dirs[-1].shape
         weight = torch.load(os.path.join(resume_dir, path),map_location='cpu')
         denoising_unet.load_state_dict(weight, strict=False)
         accelerator.print(f"Resuming from checkpoint {path}")
@@ -294,12 +396,9 @@ def main(cfg):
         for step, batch in enumerate(train_dataloader):
             t_data = time.time() - t_data_start
             with accelerator.accumulate(net):
-                data_0 = batch[0].to(weight_dtype)  # [B, 12, 8, 8, 8]
-                data_1 = batch[1].to(weight_dtype)  # [B, 4, 8, 8, 8]
-                
-                control_value = data_0[:,3:].clone()
-                data_0 = data_0[:,:3]
-                data_1 = data_1[:,:3]
+                data_0 = batch[0].to(weight_dtype)  # [B, 205560,2]
+                data_1 = batch[1].to(weight_dtype)  # [B, 205560,2]
+                noise = torch.rand_like(data_0)
 
                 if cfg.noise_offset > 0:
                     noise += cfg.noise_offset * torch.randn(
@@ -316,7 +415,7 @@ def main(cfg):
                 )
                 timesteps = timesteps.long()
                 noisy_latents = train_noise_scheduler.add_noise(data_1, noise, timesteps)
-                input_latent = torch.cat([data_0, back_data,noisy_latents], dim=1)  # [B, 2+2, D//8,  H//8, W//8]
+                input_latent = torch.cat([data_0,noisy_latents], dim=1)  # [B, 2+2, D//8,  H//8, W//8]
                 if train_noise_scheduler.prediction_type == "epsilon":
                     target = noise
                 elif train_noise_scheduler.prediction_type == "v_prediction":
@@ -336,14 +435,9 @@ def main(cfg):
                     timesteps
                 )
                 
-                weight = [1+max(0, 3* (25-i)/24) for i in range(1,64)]
-                weight = [1]+weight
-                weight = torch.tensor(weight).to(accelerator.device)
-                weight = weight.view(1, 1, 64, 1, 1)
-
                 if cfg.snr_gamma == 0:
                     loss = F.l1_loss(
-                        model_pred.float()*weight, target.float()*weight, reduction="mean"
+                        model_pred.float(), target.float(), reduction="mean"
                     )
                 else:
                     snr = compute_snr(train_noise_scheduler, timesteps)
@@ -450,7 +544,7 @@ def save_checkpoint(model, save_dir, prefix, ckpt_num, total_limit=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default="./config/train_diffusion_unet_mc_128_dynamichalo_lossweight_correction_stage1.yaml")
+    parser.add_argument("--config", type=str, default="./config/SCALED_sfc/trainning_stage1.yaml")
     args = parser.parse_args()
 
     if args.config[-5:] == ".yaml":

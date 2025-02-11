@@ -2,8 +2,6 @@ import os
 from torch.utils.data import Dataset
 import numpy as np
 import torch
-import random
-import json
 
 class SFCDataset(Dataset):
     def __init__(
@@ -12,7 +10,7 @@ class SFCDataset(Dataset):
             data_list=range(1000),
             skip_timestep=1):
         self.data_dir = data_dir
-        self.skp_timestep = skip_timestep
+        self.skip_timestep = skip_timestep
         self.data_list = [f"data_{i}.csv" for i in data_list]
 
     def __len__(self):
@@ -20,10 +18,11 @@ class SFCDataset(Dataset):
 
     def get_data(self,timestep):
         result = np.zeros((20560,2))
-        data = np.load(os.path.join(self.data_dir, self.data_list[timestep]))[:,2:]
+        data = np.loadtxt(os.path.join(self.data_dir, self.data_list[timestep]),delimiter=',')[:,2:]
         data = data/3
         result[:data.shape[0],:] = data
-        return data
+        result = result.transpose(1, 0)
+        return result
 
     def __getitem__(self,idx):
         time_step = idx
