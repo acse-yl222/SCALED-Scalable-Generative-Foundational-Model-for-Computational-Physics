@@ -5,7 +5,6 @@ In this work, we introduce SCALED, a scalable foundational neural network built 
 
 ## Building up the environment
 
-
 ## Download the building geometry
 1. South Kensington
 2. Generated Area
@@ -17,6 +16,5 @@ In this work, we introduce SCALED, a scalable foundational neural network built 
 3. Cubiod
 
 ## Trainning
-
 
 ## Inference

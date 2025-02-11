@@ -56,6 +56,7 @@ def main():
         flow_data,
         save_dir,
     )
+    
     ccsnn.predict(
         AI4PDEs_timesteps=50,
         subdomain_iteration=3,

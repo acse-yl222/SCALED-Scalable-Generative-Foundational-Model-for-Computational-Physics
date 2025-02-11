@@ -1,5 +1,6 @@
 import random
 
+
 def log_validation(
         denoising_unet,
         scheduler,
@@ -47,9 +48,6 @@ def log_validation(
     }
     del pipe
     return results
-
-
-
 
 def visualize_with_diff(data_pre, data_gt, data_ori, filename):
     # Create a figure with a larger size and higher resolution

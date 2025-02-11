@@ -56,14 +56,15 @@ class Downsample1D(nn.Module):
         self.name = name
 
         if use_conv:
-            self.conv = nn.Conv1d(self.channels, self.out_channels, 3, stride=stride, padding=padding)
+            self.conv = nn.Conv1d(self.channels, self.out_channels, 2, stride=stride, padding=padding)
         else:
             assert self.channels == self.out_channels
             self.conv = nn.AvgPool1d(kernel_size=stride, stride=stride)
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         assert inputs.shape[1] == self.channels
-        return self.conv(inputs)
+        result = self.conv(inputs)
+        return result
 
 
 class Downsample2D(nn.Module):
