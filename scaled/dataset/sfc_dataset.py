@@ -12,13 +12,17 @@ class SFCDataset(Dataset):
             data_list=range(1000),
             skip_timestep=1):
         self.data_dir = data_dir
+        self.skp_timestep = skip_timestep
         self.data_list = [f"data_{i}.csv" for i in data_list]
 
     def __len__(self):
         return len(self.data_list)
 
     def get_data(self,timestep):
-        data = np.load(os.path.join(self.data_dir, self.data_list[timestep]))
+        result = np.zeros((20560,2))
+        data = np.load(os.path.join(self.data_dir, self.data_list[timestep]))[:,2:]
+        data = data/3
+        result[:data.shape[0],:] = data
         return data
 
     def __getitem__(self,idx):

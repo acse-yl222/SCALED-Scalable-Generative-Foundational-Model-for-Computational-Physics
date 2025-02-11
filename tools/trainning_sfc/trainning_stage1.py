@@ -13,7 +13,7 @@ import diffusers
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from scaled.dataset.urban_flow_dataset import UrbanFlowSplitDataset
+from scaled.dataset.sfc_dataset import SFCDataset
 import torch.utils.checkpoint
 import transformers
 from accelerate import Accelerator
@@ -23,7 +23,7 @@ from diffusers import DDIMScheduler
 from diffusers.utils import check_min_version
 from diffusers.utils.import_utils import is_xformers_available
 from omegaconf import OmegaConf
-from scaled.model.unets.unet_3ds import UNet3DsModel
+from scaled.model.unets.unet_1ds import UNet1DsModel
 from tqdm.auto import tqdm
 from scaled.pipelines.pipline_ddim_scaled_urbanflow import SCALEDUrbanFlowPipeline
 from scaled.utils.util import import_filename,seed_everything
@@ -36,6 +36,7 @@ import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import numpy as np
+import bitsandbytes
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../scaled')))
 warnings.filterwarnings("ignore")
@@ -108,7 +109,6 @@ def main(cfg):
         transformers.utils.logging.set_verbosity_error()
         diffusers.utils.logging.set_verbosity_error()
 
-    # If passed along, set the training seed now.
     if cfg.seed is not None:
         seed_everything(cfg.seed)
 
@@ -142,16 +142,16 @@ def main(cfg):
     sched_kwargs.update({"beta_schedule": "scaled_linear"})
     train_noise_scheduler = DDIMScheduler(**sched_kwargs)
 
-    denoising_unet  = UNet3DsModel(in_channels=9,
-                                  out_channels=3,
-                                  down_block_types=("DownBlock3D", "DownBlock3D", "DownBlock3D", "DownBlock3D"),
-                                  up_block_types=("UpBlock3D", "UpBlock3D", "UpBlock3D", "UpBlock3D"),
-                                  block_out_channels=(64, 128, 192, 256),
-                                  add_attention=False,
-                                  )
+    denoising_unet  = UNet1DsModel(
+        in_channels=2,
+        out_channels=2,
+        down_block_types=("DownBlock1D", "DownBlock1D", "DownBlock1D", "DownBlock1D"),
+        up_block_types=("UpBlock1D", "UpBlock1D", "UpBlock1D", "UpBlock1D"),
+        block_out_channels=(64, 128, 192, 256),
+        add_attention=False,
+        )
     net = Net(denoising_unet)
     denoising_unet.requires_grad_(True)
-    # vae.requires_grad_(False)
 
     if cfg.solver.enable_xformers_memory_efficient_attention:
         if is_xformers_available():
@@ -197,20 +197,12 @@ def main(cfg):
         eps=cfg.solver.adam_epsilon,
     )
 
-    train_dataset = UrbanFlowSplitDataset(
-        data_dir="/lustre/scratch/mmm1460/data/flow_past_building_l_split",
-        rotato_ratio=0.8,
-        stride=4,
-        skip_timestep=cfg.skip_timestep,
-        subdomain_size=128,
-        time_steps_list=[i for i in range(0, 5000)])
-    val_dataset  = UrbanFlowSplitDataset(
-        data_dir="/lustre/scratch/mmm1460/data/flow_past_building_l_split",
-        rotato_ratio=0,
-        stride=16,
-        subdomain_size=128,
-        skip_timestep=cfg.skip_timestep,
-        time_steps_list=[i for i in range(5000, 6000)])
+    train_dataset = SFCDataset(
+        data_dir="data/csv_data",
+        time_steps_list=[i for i in range(0, 800)])
+    val_dataset  = SFCDataset(
+        data_dir="data/csv_data",
+        time_steps_list=[i for i in range(800,1000)])
 
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
@@ -308,24 +300,6 @@ def main(cfg):
                 control_value = data_0[:,3:].clone()
                 data_0 = data_0[:,:3]
                 data_1 = data_1[:,:3]
-
-                # change the background data for trainning
-                background_value = control_value.clone().bool()
-                halo_cell  = random.choice([4,6,8,12])
-                choice = random.random()
-                if choice<0:
-                    back_data = data_1.clone()
-                    back_data[:, :, 1:-1, halo_cell:-halo_cell, halo_cell:-halo_cell] = 1
-                    back_data[:,0:1][background_value] = 0
-                    back_data[:,1:2][background_value] = 0
-                    back_data[:,2:3][background_value] = 0
-                else:
-                    back_data = data_1.clone()
-                    back_data[:, :, 1:-1] = 1
-                    back_data[:, 0:1][background_value] = 0
-                    back_data[:, 1:2][background_value] = 0
-                    back_data[:, 2:3][background_value] = 0
-                noise = torch.randn_like(data_1)
 
                 if cfg.noise_offset > 0:
                     noise += cfg.noise_offset * torch.randn(
