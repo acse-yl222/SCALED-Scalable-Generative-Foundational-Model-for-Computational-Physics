@@ -1,9 +1,8 @@
+## import pakages
 import argparse
-import copy
 import logging
 import math
 import os
-import pdb
 import os.path as osp
 import random
 import time
@@ -14,7 +13,7 @@ import diffusers
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from src.dataset.flow_past_building_dataset import FlowDiffusionDatasetFreeSamplingV7
+from scaled.dataset.urban_flow_dataset import UrbanFlowSplitDataset
 import torch.utils.checkpoint
 import transformers
 from accelerate import Accelerator
@@ -24,244 +23,21 @@ from diffusers import DDIMScheduler
 from diffusers.utils import check_min_version
 from diffusers.utils.import_utils import is_xformers_available
 from omegaconf import OmegaConf
-from src.models_scaleinvariance.unets.unet_3ds import UNet3DsModel
+from scaled.model.unets.unet_3ds import UNet3DsModel
 from tqdm.auto import tqdm
-from src.pipelines.pipline_ddim_inpainiting_uncompressed_flow_unify_building import UncompressedFlowBuildingUnifyInpaintingPipeline
-from src.utils.util import (
-    import_filename,
-    seed_everything,
-)
-import matplotlib.pyplot as plt
-
+from scaled.utils.util import import_filename,seed_everything
 import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src')))
+from trainning_validation import log_validation,visualize_with_diff,logger,compute_snr,Net
 
+# initialize the enviroment
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../scaled')))
 warnings.filterwarnings("ignore")
-import numpy as np
-from src.utils.util import tools
-
-# Will error if the minimal version of diffusers is not installed. Remove at your own risks.
-check_min_version("0.10.0.dev0")
-logger = get_logger(__name__, log_level="INFO")
-
-import matplotlib.gridspec as gridspec
-import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
-import numpy as np
-
-def visualize_with_diff(data_pre, data_gt, data_ori, filename):
-    # Create a figure with a larger size and higher resolution
-    fig = plt.figure(figsize=(24, 24), dpi=300)  # Adjust figsize to accommodate diff images
-    gs = gridspec.GridSpec(4, 4, width_ratios=[1, 1, 1, 0.1])  # Add extra row for diff and column for colorbars
-    
-    for i in range(3):
-        # Plot each image
-        ax1 = plt.subplot(gs[i, 0])
-        im1 = ax1.imshow(data_pre[i, 4], vmin=-1, vmax=1)
-        ax1.set_title('Prediction')
-        ax1.axis('off')  # Hide axes for better visualization
-        
-        ax2 = plt.subplot(gs[i, 1])
-        im2 = ax2.imshow(data_gt[i, 4], vmin=-1, vmax=1)
-        ax2.set_title('Ground Truth')
-        ax2.axis('off')
-        
-        ax3 = plt.subplot(gs[i, 2])
-        im3 = ax3.imshow(data_ori[i, 4], vmin=-1, vmax=1)
-        ax3.set_title('Original Data')
-        ax3.axis('off')
-        
-        # Add colorbars in the 4th column
-        cbar_ax1 = plt.subplot(gs[i, 3])
-        fig.colorbar(im1, cax=cbar_ax1)
-        
-        cbar_ax2 = plt.subplot(gs[i, 3])
-        fig.colorbar(im2, cax=cbar_ax2)
-        
-        cbar_ax3 = plt.subplot(gs[i, 3])
-        fig.colorbar(im3, cax=cbar_ax3)
-    
-    # Now plot the differences in the 4th row
-    diff_pre_gt = np.abs(data_pre - data_gt)  # Difference between Prediction and Ground Truth
-    diff_pre_ori = np.abs(data_pre - data_ori)  # Difference between Prediction and Original
-    diff_gt_ori = np.abs(data_gt - data_ori)  # Difference between Ground Truth and Original
-    
-    ax4 = plt.subplot(gs[3, 0])
-    im4 = ax4.imshow(diff_pre_gt[0, 4], vmin=0, vmax=0.25)
-    ax4.set_title('Diff Pre-GT')
-    ax4.axis('off')
-    
-    ax5 = plt.subplot(gs[3, 1])
-    im5 = ax5.imshow(diff_pre_ori[0, 4], vmin=0, vmax=0.25)
-    ax5.set_title('Diff Pre-Ori')
-    ax5.axis('off')
-    
-    ax6 = plt.subplot(gs[3, 2])
-    im6 = ax6.imshow(diff_gt_ori[0, 4], vmin=0, vmax=0.25)
-    ax6.set_title('Diff GT-Ori')
-    ax6.axis('off')
-    
-    # Add colorbars for the differences
-    cbar_ax4 = plt.subplot(gs[3, 3])
-    fig.colorbar(im4, cax=cbar_ax4)
-    
-    cbar_ax5 = plt.subplot(gs[3, 3])
-    fig.colorbar(im5, cax=cbar_ax5)
-    
-    cbar_ax6 = plt.subplot(gs[3, 3])
-    fig.colorbar(im6, cax=cbar_ax6)
-    
-    # Adjust layout to avoid overlap
-    plt.tight_layout()
-    
-    # Save the figure with higher resolution
-    plt.savefig(filename, dpi=300)
-    plt.close(fig)
-
-
-
-class Net(nn.Module):
-    def __init__(
-            self,
-            denoising_unet: UNet3DsModel,
-            # control_net: ControlNet,
-    ):
-        super().__init__()
-        self.denoising_unet = denoising_unet
-        # self.control_net = control_net
-
-    def forward(
-            self,
-            noisy_latents,
-            timesteps,
-    ):
-        model_pred = self.denoising_unet(
-        noisy_latents,
-        timesteps,
-        ).sample
-        return model_pred
-
-
-def compute_snr(noise_scheduler, timesteps):
-    """
-    Computes SNR as per
-    https://github.com/TiankaiHang/Min-SNR-Diffusion-Training/blob/521b624bd70c67cee4bdf49225915f5945a872e3/guided_diffusion/gaussian_diffusion.py#L847-L849
-    """
-    alphas_cumprod = noise_scheduler.alphas_cumprod
-    sqrt_alphas_cumprod = alphas_cumprod ** 0.5
-    sqrt_one_minus_alphas_cumprod = (1.0 - alphas_cumprod) ** 0.5
-
-    # Expand the tensors.
-    # Adapted from https://github.com/TiankaiHang/Min-SNR-Diffusion-Training/blob/521b624bd70c67cee4bdf49225915f5945a872e3/guided_diffusion/gaussian_diffusion.py#L1026
-    sqrt_alphas_cumprod = sqrt_alphas_cumprod.to(device=timesteps.device)[
-        timesteps
-    ].float()
-    while len(sqrt_alphas_cumprod.shape) < len(timesteps.shape):
-        sqrt_alphas_cumprod = sqrt_alphas_cumprod[..., None]
-    alpha = sqrt_alphas_cumprod.expand(timesteps.shape)
-
-    sqrt_one_minus_alphas_cumprod = sqrt_one_minus_alphas_cumprod.to(
-        device=timesteps.device
-    )[timesteps].float()
-    while len(sqrt_one_minus_alphas_cumprod.shape) < len(timesteps.shape):
-        sqrt_one_minus_alphas_cumprod = sqrt_one_minus_alphas_cumprod[..., None]
-    sigma = sqrt_one_minus_alphas_cumprod.expand(timesteps.shape)
-
-    # Compute SNR.
-    snr = (alpha / sigma) ** 2
-    return snr
-
-
-def log_validation(
-        denoising_unet,
-        scheduler,
-        accelerator,
-        generator=None,
-        valid_dataset=None
-):
-    logger.info("Running validation... ")
-
-    if generator is None:
-        generator = torch.manual_seed(42)
-    dataset_len = len(valid_dataset)
-    sample_idx = [random.randint(0, dataset_len) for _ in range(1)]
-
-    pipe = UncompressedFlowBuildingUnifyInpaintingPipeline(
-        denoising_unet,
-        scheduler=scheduler,
-    )
-    pipe = pipe.to(accelerator.device)
-
-    results = {}
-    # for idx in sample_idx:
-    ori_data, gt_result = valid_dataset[sample_idx[0]] # condition （9x32x32x32） gt_result (9x32x32x32)
-    
-    previous_value = ori_data[:3].unsqueeze(0).to('cuda')
-    control_value = ori_data[3:].unsqueeze(0).to('cuda')
-    next_value = gt_result[:3].unsqueeze(0).to('cuda')
-    # change the background data for trainning
-    
-    background_value = control_value.clone().bool()
-    back_data = next_value.clone()
-    back_data[:, :, 1:-1] = 1
-    back_data[:, 0:1][background_value] = 0
-    back_data[:, 1:2][background_value] = 0
-    back_data[:, 2:3][background_value] = 0
-    
-    # import pdb
-    # pdb.set_trace()
-    pre_particle = pipe(
-        previous_value,
-        back_data,
-        num_inference_steps=25,
-        guidance_scale=0,
-        depth=64,
-        height=128,
-        width=128,
-        generator=generator,
-        return_dict=False,
-    )
-    results['WithoutBackground'] = {
-        "prediction_flow": pre_particle.detach().cpu().numpy()[0],
-        "gt_flow": next_value.detach().cpu().numpy()[0],
-        "original_flow": previous_value.detach().cpu().numpy()[0]
-    }
-    
-    pipe = UncompressedFlowBuildingUnifyInpaintingPipeline(
-        denoising_unet,
-        scheduler=scheduler,
-    )
-    pipe = pipe.to(accelerator.device)
-    
-    back_data = next_value.clone()
-    back_data[:, :, 1:-1, 8:-8, 8:-8] = 1
-    back_data[:,0:1][background_value] = 0
-    back_data[:,1:2][background_value] = 0
-    back_data[:,2:3][background_value] = 0
-    pre_particle = pipe(
-        previous_value,
-        back_data,
-        num_inference_steps=25,
-        guidance_scale=0,
-        depth=64,
-        height=128,
-        width=128,
-        generator=generator,
-        return_dict=False,
-    )
-    pre_tem = next_value.clone()
-    pre_tem[:,:,1:-1,8:-8,8:-8] = pre_particle[:,:,1:-1,8:-8,8:-8]
-    results['WithBackground'] = {
-        "prediction_flow": pre_tem.detach().cpu().numpy()[0],
-        "gt_flow": next_value.detach().cpu().numpy()[0],
-        "original_flow": previous_value.detach().cpu().numpy()[0]
-    }
-    del pipe
-    return results
 
 
 def main(cfg):
+
+    # Initialize the accelerator. We will let the accelerator handle everything for us.
     kwargs = DistributedDataParallelKwargs(find_unused_parameters=False)
     accelerator = Accelerator(
         gradient_accumulation_steps=cfg.solver.gradient_accumulation_steps,
@@ -282,11 +58,10 @@ def main(cfg):
     else:
         transformers.utils.logging.set_verbosity_error()
         diffusers.utils.logging.set_verbosity_error()
-
-    # If passed along, set the training seed now.
     if cfg.seed is not None:
         seed_everything(cfg.seed)
 
+    # setup basic experiments
     exp_name = cfg.exp_name
     save_dir = f"{cfg.output_dir}/{exp_name}"
     if accelerator.is_main_process:
@@ -312,10 +87,10 @@ def main(cfg):
             timestep_spacing="trailing",
             prediction_type=cfg.prediction_type,
         )
-    # val_noise_scheduler = DDIMScheduler(**sched_kwargs)
     sched_kwargs.update({"beta_schedule": "scaled_linear"})
     train_noise_scheduler = DDIMScheduler(**sched_kwargs)
 
+    # Initialize the model
     denoising_unet  = UNet3DsModel(in_channels=9,
                                   out_channels=3,
                                   down_block_types=("DownBlock3D", "DownBlock3D", "DownBlock3D", "DownBlock3D"),
@@ -325,7 +100,6 @@ def main(cfg):
                                   )
     net = Net(denoising_unet)
     denoising_unet.requires_grad_(True)
-    # vae.requires_grad_(False)
 
     if cfg.solver.enable_xformers_memory_efficient_attention:
         if is_xformers_available():
@@ -338,6 +112,7 @@ def main(cfg):
     if cfg.solver.gradient_checkpointing:
         denoising_unet.enable_gradient_checkpointing()
 
+    # Initialize the learning rate
     if cfg.solver.scale_lr:
         learning_rate = (
                 cfg.solver.learning_rate
@@ -360,7 +135,6 @@ def main(cfg):
         optimizer_cls = bnb.optim.AdamW8bit
     else:
         optimizer_cls = torch.optim.AdamW
-
     trainable_params = list(filter(lambda p: p.requires_grad, net.parameters()))
     logger.info(f"Total trainable params {len(trainable_params)}")
     optimizer = optimizer_cls(
@@ -371,15 +145,16 @@ def main(cfg):
         eps=cfg.solver.adam_epsilon,
     )
 
-    train_dataset = FlowDiffusionDatasetFreeSamplingV7(
-        data_dir="/lustre/scratch/mmm1460/data/flow_past_building_l_split",
-        rotato_ratio=0.5,
+    # Load the dataset
+    train_dataset = UrbanFlowSplitDataset(
+        data_dir=cfg.dataset_path,
+        rotato_ratio=0.8,
         stride=4,
         skip_timestep=cfg.skip_timestep,
-        subdomain_size=128,
+        subdomain_size=32,
         time_steps_list=[i for i in range(0, 5000)])
-    val_dataset  = FlowDiffusionDatasetFreeSamplingV7(
-        data_dir="/lustre/scratch/mmm1460/data/flow_past_building_l_split",
+    val_dataset  = UrbanFlowSplitDataset(
+        data_dir=cfg.dataset_path,
         rotato_ratio=0,
         stride=16,
         subdomain_size=128,
@@ -399,7 +174,6 @@ def main(cfg):
         net,
         optimizer,
         train_dataloader,
-        # lr_scheduler,
     ) = accelerator.prepare(
         net,
         optimizer,
@@ -477,9 +251,8 @@ def main(cfg):
         for step, batch in enumerate(train_dataloader):
             t_data = time.time() - t_data_start
             with accelerator.accumulate(net):
-                data_0 = batch[0].to(weight_dtype)  # [B, 12, 8, 8, 8]
-                data_1 = batch[1].to(weight_dtype)  # [B, 4, 8, 8, 8]
-                
+                data_0 = batch[0].to(weight_dtype)
+                data_1 = batch[1].to(weight_dtype)
                 control_value = data_0[:,3:].clone()
                 data_0 = data_0[:,:3]
                 data_1 = data_1[:,:3]
@@ -488,7 +261,7 @@ def main(cfg):
                 background_value = control_value.clone().bool()
                 halo_cell  = random.choice([4,6,8,12])
                 choice = random.random()
-                if choice<0.9:
+                if choice<0.6:
                     back_data = data_1.clone()
                     back_data[:, :, 1:-1, halo_cell:-halo_cell, halo_cell:-halo_cell] = 1
                     back_data[:,0:1][background_value] = 0
@@ -618,7 +391,6 @@ def main(cfg):
         # save model after each epoch
         # Create the pipeline using the trained modules and save it.
         accelerator.wait_for_everyone()
-        accelerator.end_training()
 
 
 def save_checkpoint(model, save_dir, prefix, ckpt_num, total_limit=None):
@@ -651,7 +423,7 @@ def save_checkpoint(model, save_dir, prefix, ckpt_num, total_limit=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default="./config/train_diffusion_unet_mc_128_dynamichalo_lossweight_correction_stage2.yaml")
+    parser.add_argument("--config", type=str, default="./config/trainning_stage1.yaml")
     args = parser.parse_args()
 
     if args.config[-5:] == ".yaml":

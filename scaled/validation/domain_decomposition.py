@@ -2,13 +2,12 @@ import os
 import torch
 from tqdm import tqdm
 import numpy as np
-from ..pipelines.pipline_ddim_scaled_urbanflow import UncompressedFlowBuildingUnifyInpaintingPipeline
+from ..pipelines.pipline_ddim_scaled_urbanflow import SCALEDUrbanFlowPipeline
 import matplotlib.pyplot as plt
 import torch
 import torch.distributed as dist
 from accelerate.utils import gather_object
 import torch
-import torch.multiprocessing as mp
 from tqdm import tqdm
 from accelerate import PartialState
 from accelerate.utils import gather_object
@@ -53,7 +52,7 @@ class predict_model:
                  subdomain_size,
                  num_inference_steps,):
         self.subdomain_size = subdomain_size
-        self.pipe = UncompressedFlowBuildingUnifyInpaintingPipeline(
+        self.pipe = SCALEDUrbanFlowPipeline(
                 model,
                 scheduler=noise_scheduler)
         self.num_inference_steps = num_inference_steps
@@ -96,7 +95,7 @@ class predict_model_unet:
         return self
 
 
-class CCSNN_FlowPastBuilding:
+class DomainDecomposition:
     def __init__(self,
                  model,
                  domain_size=(64,488,488),
@@ -228,7 +227,7 @@ class CCSNN_FlowPastBuilding:
 
 
 
-class CCSNN_FlowPastBuilding_multiGPUs(CCSNN_FlowPastBuilding):
+class DomainDecompositionMultipleGPUs(DomainDecomposition):
     def subdomain_interations(self,data_0,data_1,boundary_condition,subdomain_size,halo_size=4,divide_number=25,num_gpus=1):
         sub_data_0,index_list = self.patch_4Nx_flow_past_building(data_0, subdomain_size,halo_size)
         sub_data_1,_ = self.patch_4Nx_flow_past_building(data_1, subdomain_size,halo_size)
@@ -239,13 +238,10 @@ class CCSNN_FlowPastBuilding_multiGPUs(CCSNN_FlowPastBuilding):
         sub_data_1[:,0:1][building] = 0
         sub_data_1[:,1:2][building] = 0
         sub_data_1[:,2:3][building] = 0
-        
         n = len(sub_data_0)//divide_number
         print(f'n: {n}')
-        
         pre_result = []
         input_list = []
-        
         for i in range(n):
             sub_data_0_input = sub_data_0[i*divide_number:(i+1)*divide_number]
             sub_data_1_input = sub_data_1[i*divide_number:(i+1)*divide_number]

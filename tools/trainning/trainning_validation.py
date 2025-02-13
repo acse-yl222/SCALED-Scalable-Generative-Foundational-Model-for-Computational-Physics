@@ -1,5 +1,55 @@
 import random
+from accelerate.logging import get_logger
+logger = get_logger(__name__, log_level="INFO")
+import matplotlib.pyplot as plt
+import numpy as np
+import matplotlib.gridspec as gridspec
+from scaled.pipelines.pipline_ddim_scaled_urbanflow import SCALEDUrbanFlowPipeline
+import torch
+from scaled.model.unets.unet_3ds import UNet3DsModel
+import torch.nn as nn
 
+class Net(nn.Module):
+    def __init__(
+            self,
+            denoising_unet: UNet3DsModel,
+    ):
+        super().__init__()
+        self.denoising_unet = denoising_unet
+    def forward(
+            self,
+            noisy_latents,
+            timesteps,
+    ):
+        model_pred = self.denoising_unet(
+        noisy_latents,
+        timesteps,
+        ).sample
+        return model_pred
+
+
+def compute_snr(noise_scheduler, timesteps):
+    """
+    Computes SNR as per
+    https://github.com/TiankaiHang/Min-SNR-Diffusion-Training/blob/521b624bd70c67cee4bdf49225915f5945a872e3/guided_diffusion/gaussian_diffusion.py#L847-L849
+    """
+    alphas_cumprod = noise_scheduler.alphas_cumprod
+    sqrt_alphas_cumprod = alphas_cumprod ** 0.5
+    sqrt_one_minus_alphas_cumprod = (1.0 - alphas_cumprod) ** 0.5
+    sqrt_alphas_cumprod = sqrt_alphas_cumprod.to(device=timesteps.device)[
+        timesteps
+    ].float()
+    while len(sqrt_alphas_cumprod.shape) < len(timesteps.shape):
+        sqrt_alphas_cumprod = sqrt_alphas_cumprod[..., None]
+    alpha = sqrt_alphas_cumprod.expand(timesteps.shape)
+    sqrt_one_minus_alphas_cumprod = sqrt_one_minus_alphas_cumprod.to(
+        device=timesteps.device
+    )[timesteps].float()
+    while len(sqrt_one_minus_alphas_cumprod.shape) < len(timesteps.shape):
+        sqrt_one_minus_alphas_cumprod = sqrt_one_minus_alphas_cumprod[..., None]
+    sigma = sqrt_one_minus_alphas_cumprod.expand(timesteps.shape)
+    snr = (alpha / sigma) ** 2
+    return snr
 
 def log_validation(
         denoising_unet,
@@ -30,7 +80,7 @@ def log_validation(
     back_data[:, 0:1][background_value] = 0
     back_data[:, 1:2][background_value] = 0
     back_data[:, 2:3][background_value] = 0
-    pre_particle = pipe(
+    pre = pipe(
         previous_value,
         back_data,
         num_inference_steps=25,
@@ -42,7 +92,7 @@ def log_validation(
         return_dict=False,
     )
     results['WithoutBackground'] = {
-        "prediction_flow": pre_particle.detach().cpu().numpy()[0],
+        "prediction_flow": pre.detach().cpu().numpy()[0],
         "gt_flow": next_value.detach().cpu().numpy()[0],
         "original_flow": previous_value.detach().cpu().numpy()[0]
     }

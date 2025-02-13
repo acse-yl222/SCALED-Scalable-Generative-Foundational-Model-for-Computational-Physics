@@ -1,9 +1,8 @@
 from scaled.model.unets.unet_3ds import UNet3DsModel
-from scaled.pipelines.pipline_ddim_scaled_urbanflow import SCALEDUrbanFlowPipeline
 from diffusers import DDIMScheduler
 from scaled.dataset.urban_flow_dataset import UrbanFlowDataset
 import torch
-from scaled.validation.domain_decomposition import CCSNN_FlowPastBuilding_multiGPUs
+from scaled.validation.domain_decomposition import DomainDecompositionMultipleGPUs
 from scaled.validation.domain_decomposition import predict_model
 
 ## model preparation
@@ -11,8 +10,10 @@ def main():
     subdomain_size = (64,136,136)
     wholedomain_size = (64,496,496)
     halo_size = 8
-    weight_path = 'BS/backup/unet_flow/mc_128_correction/denoising_unet-2333000.pth'
-    save_dir = 'BS/result/flow_past_cuboid_mc'
+    weight_path = ''
+    save_dir = 'result/scaled_urbanflow_c'
+    dataset_dir = ''
+    num_GPUs = 2
     
     model  = UNet3DsModel(
         in_channels=9,
@@ -44,13 +45,13 @@ def main():
                           num_inference_steps=10)
     
     flow_data = UrbanFlowDataset(
-        data_dir="/lustre/scratch/mmm1460/data/flow_past_building",
+        data_dir=dataset_dir,
         rotato_ratio=0,
         skip_timestep=50,
         time_steps_list=[i for i in range(3000, 8000)]
         )
     
-    ccsnn = CCSNN_FlowPastBuilding_multiGPUs(
+    ccsnn = DomainDecompositionMultipleGPUs(
         model,
         wholedomain_size,
         flow_data,
@@ -63,7 +64,7 @@ def main():
         subdomain_size=subdomain_size,
         halo_size=halo_size,
         divide_number=2,
-        num_gpus=8,
+        num_gpus=num_GPUs,
     )
 
 main()

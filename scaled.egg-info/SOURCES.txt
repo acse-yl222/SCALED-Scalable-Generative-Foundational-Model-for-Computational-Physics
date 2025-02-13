@@ -1,0 +1,7 @@
+LICENSE
+README.md
+setup.py
+scaled.egg-info/PKG-INFO
+scaled.egg-info/SOURCES.txt
+scaled.egg-info/dependency_links.txt
+scaled.egg-info/top_level.txt

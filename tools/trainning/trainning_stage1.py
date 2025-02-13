@@ -25,68 +25,19 @@ from diffusers.utils.import_utils import is_xformers_available
 from omegaconf import OmegaConf
 from scaled.model.unets.unet_3ds import UNet3DsModel
 from tqdm.auto import tqdm
-from scaled.pipelines.pipline_ddim_scaled_urbanflow import SCALEDUrbanFlowPipeline
 from scaled.utils.util import import_filename,seed_everything
-import matplotlib.pyplot as plt
 import sys
 import os
-import numpy as np
-from scaled.utils.util import tools
-import matplotlib.gridspec as gridspec
-import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
-import numpy as np
+from trainning_validation import log_validation,visualize_with_diff,logger,compute_snr,Net
 
+# initialize the enviroment
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../scaled')))
 warnings.filterwarnings("ignore")
-check_min_version("0.10.0.dev0")
-logger = get_logger(__name__, log_level="INFO")
-
-class Net(nn.Module):
-    def __init__(
-            self,
-            denoising_unet: UNet3DsModel,
-    ):
-        super().__init__()
-        self.denoising_unet = denoising_unet
-    def forward(
-            self,
-            noisy_latents,
-            timesteps,
-    ):
-        model_pred = self.denoising_unet(
-        noisy_latents,
-        timesteps,
-        ).sample
-        return model_pred
-
-
-def compute_snr(noise_scheduler, timesteps):
-    """
-    Computes SNR as per
-    https://github.com/TiankaiHang/Min-SNR-Diffusion-Training/blob/521b624bd70c67cee4bdf49225915f5945a872e3/guided_diffusion/gaussian_diffusion.py#L847-L849
-    """
-    alphas_cumprod = noise_scheduler.alphas_cumprod
-    sqrt_alphas_cumprod = alphas_cumprod ** 0.5
-    sqrt_one_minus_alphas_cumprod = (1.0 - alphas_cumprod) ** 0.5
-    sqrt_alphas_cumprod = sqrt_alphas_cumprod.to(device=timesteps.device)[
-        timesteps
-    ].float()
-    while len(sqrt_alphas_cumprod.shape) < len(timesteps.shape):
-        sqrt_alphas_cumprod = sqrt_alphas_cumprod[..., None]
-    alpha = sqrt_alphas_cumprod.expand(timesteps.shape)
-    sqrt_one_minus_alphas_cumprod = sqrt_one_minus_alphas_cumprod.to(
-        device=timesteps.device
-    )[timesteps].float()
-    while len(sqrt_one_minus_alphas_cumprod.shape) < len(timesteps.shape):
-        sqrt_one_minus_alphas_cumprod = sqrt_one_minus_alphas_cumprod[..., None]
-    sigma = sqrt_one_minus_alphas_cumprod.expand(timesteps.shape)
-    snr = (alpha / sigma) ** 2
-    return snr
-
 
 
 def main(cfg):
+
+    # Initialize the accelerator. We will let the accelerator handle everything for us.
     kwargs = DistributedDataParallelKwargs(find_unused_parameters=False)
     accelerator = Accelerator(
         gradient_accumulation_steps=cfg.solver.gradient_accumulation_steps,
@@ -107,8 +58,6 @@ def main(cfg):
     else:
         transformers.utils.logging.set_verbosity_error()
         diffusers.utils.logging.set_verbosity_error()
-
-    # If passed along, set the training seed now.
     if cfg.seed is not None:
         seed_everything(cfg.seed)
 
@@ -138,10 +87,10 @@ def main(cfg):
             timestep_spacing="trailing",
             prediction_type=cfg.prediction_type,
         )
-    # val_noise_scheduler = DDIMScheduler(**sched_kwargs)
     sched_kwargs.update({"beta_schedule": "scaled_linear"})
     train_noise_scheduler = DDIMScheduler(**sched_kwargs)
 
+    # Initialize the model
     denoising_unet  = UNet3DsModel(in_channels=9,
                                   out_channels=3,
                                   down_block_types=("DownBlock3D", "DownBlock3D", "DownBlock3D", "DownBlock3D"),
@@ -151,7 +100,6 @@ def main(cfg):
                                   )
     net = Net(denoising_unet)
     denoising_unet.requires_grad_(True)
-    # vae.requires_grad_(False)
 
     if cfg.solver.enable_xformers_memory_efficient_attention:
         if is_xformers_available():
@@ -164,6 +112,7 @@ def main(cfg):
     if cfg.solver.gradient_checkpointing:
         denoising_unet.enable_gradient_checkpointing()
 
+    # Initialize the learning rate
     if cfg.solver.scale_lr:
         learning_rate = (
                 cfg.solver.learning_rate
@@ -186,7 +135,6 @@ def main(cfg):
         optimizer_cls = bnb.optim.AdamW8bit
     else:
         optimizer_cls = torch.optim.AdamW
-
     trainable_params = list(filter(lambda p: p.requires_grad, net.parameters()))
     logger.info(f"Total trainable params {len(trainable_params)}")
     optimizer = optimizer_cls(
@@ -197,15 +145,16 @@ def main(cfg):
         eps=cfg.solver.adam_epsilon,
     )
 
+    # Load the dataset
     train_dataset = UrbanFlowSplitDataset(
-        data_dir="/lustre/scratch/mmm1460/data/flow_past_building_l_split",
+        data_dir=cfg.dataset_path,
         rotato_ratio=0.8,
         stride=4,
         skip_timestep=cfg.skip_timestep,
-        subdomain_size=128,
+        subdomain_size=32,
         time_steps_list=[i for i in range(0, 5000)])
     val_dataset  = UrbanFlowSplitDataset(
-        data_dir="/lustre/scratch/mmm1460/data/flow_past_building_l_split",
+        data_dir=cfg.dataset_path,
         rotato_ratio=0,
         stride=16,
         subdomain_size=128,
@@ -302,9 +251,8 @@ def main(cfg):
         for step, batch in enumerate(train_dataloader):
             t_data = time.time() - t_data_start
             with accelerator.accumulate(net):
-                data_0 = batch[0].to(weight_dtype)  # [B, 12, 8, 8, 8]
-                data_1 = batch[1].to(weight_dtype)  # [B, 4, 8, 8, 8]
-                
+                data_0 = batch[0].to(weight_dtype)
+                data_1 = batch[1].to(weight_dtype)
                 control_value = data_0[:,3:].clone()
                 data_0 = data_0[:,:3]
                 data_1 = data_1[:,:3]
@@ -443,7 +391,6 @@ def main(cfg):
         # save model after each epoch
         # Create the pipeline using the trained modules and save it.
         accelerator.wait_for_everyone()
-        accelerator.end_training()
 
 
 def save_checkpoint(model, save_dir, prefix, ckpt_num, total_limit=None):
@@ -476,7 +423,7 @@ def save_checkpoint(model, save_dir, prefix, ckpt_num, total_limit=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default="./config/train_diffusion_unet_mc_128_dynamichalo_lossweight_correction_stage1.yaml")
+    parser.add_argument("--config", type=str, default="./config/trainning_stage1.yaml")
     args = parser.parse_args()
 
     if args.config[-5:] == ".yaml":
