@@ -34,11 +34,11 @@ python tools/dataset_generator/cuboid.py
 
 ## Trainning
 The code support multi-gpus trainning
-Multi-gpu trainning, using 4 gpus.
+Multi-gpus trainning, using 4 gpus.
 ```bash
 accelerate launch --num_processes 4 tools/trainning_sfc/trainning_stage1.py
 ```
-single-gpu trainning, using 1 gpus.
+single-gpus trainning, using 1 gpus.
 ```bash
 python tools/trainning_sfc/trainning_stage2.py
 ```

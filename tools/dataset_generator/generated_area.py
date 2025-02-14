@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 
-save_path = '/lustre/scratch/mmm1460/data/flow_past_cuboid'
+save_path = 'generated_area'
 geometry_path = "building_files/Cuboid.npy"
 
 os.makedirs(save_path,exist_ok=True)

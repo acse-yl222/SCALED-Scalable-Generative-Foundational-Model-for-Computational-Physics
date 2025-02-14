@@ -10,7 +10,7 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 
 
-save_path = 'flow_past_cuboid'
+save_path = 'south_kensington'
 geometry_path = "building_files/Cuboid.npy"
 
 os.makedirs(save_path,exist_ok=True)

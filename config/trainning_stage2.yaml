@@ -22,7 +22,7 @@ val:
   validation_steps: 1000
   validation_steps_tuple: []
 
-dataset_path: /lustre/scratch/mmm1460/data/flow_past_building_l_split
+dataset_path: 
 
 
 noise_scheduler_kwargs:

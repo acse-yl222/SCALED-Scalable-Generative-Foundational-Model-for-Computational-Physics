@@ -21,7 +21,7 @@ val:
   validation_steps: 1000
   validation_steps_tuple: []
 
-dataset_path: /lustre/scratch/mmm1460/data/flow_past_building_l_split
+dataset_path: 
 
 noise_scheduler_kwargs:
   num_train_timesteps: 1000
@@ -42,7 +42,7 @@ enable_zero_snr: True
 skip_timestep: 50
 seed: 12580
 resume_from_checkpoint: ''
-exp_name: 'scale_urbanflow_stage2'
+exp_name: 'scale_urbanflow_stage1'
 output_dir: 'exp_output'
 
 prediction_type: "v_prediction"
