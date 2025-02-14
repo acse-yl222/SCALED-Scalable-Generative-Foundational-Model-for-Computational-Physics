@@ -1,3 +1,9 @@
 data
 exp_output
 *.egg-info
+cluster_job
+.vscode
+result
+weight_save
+*.so
+output

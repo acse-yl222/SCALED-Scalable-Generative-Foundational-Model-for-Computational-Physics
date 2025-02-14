@@ -41,7 +41,7 @@ enable_zero_snr: True
 skip_timestep: 50
 seed: 12580
 resume_from_checkpoint: 'latest'
-exp_name: 'sfc_stage1'
+exp_name: 'sfc_unet_stage1'
 output_dir: './exp_output'
 
 prediction_type: "v_prediction"

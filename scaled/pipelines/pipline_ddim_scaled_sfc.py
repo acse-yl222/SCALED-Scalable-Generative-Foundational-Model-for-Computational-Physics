@@ -101,8 +101,8 @@ class SCALEDSFCPipeline(DiffusionPipeline):
     ):
         shape = (
             batch_size,
-            length,
             num_channels_latents,
+            length,
         )
         if isinstance(generator, list) and len(generator) != batch_size:
             raise ValueError(
@@ -139,7 +139,6 @@ class SCALEDSFCPipeline(DiffusionPipeline):
     ):
 
         device = self._execution_device
-
         do_classifier_free_guidance = guidance_scale > 1.0
 
         # Prepare timesteps
@@ -152,13 +151,8 @@ class SCALEDSFCPipeline(DiffusionPipeline):
             dtype=self.denoising_unet.dtype, device=self.denoising_unet.device
         )
         
-        background_value = background_value.to(
-            dtype=self.denoising_unet.dtype, device=self.denoising_unet.device
-        )
-        
         if do_classifier_free_guidance:
             negtive_previous_flow_value = torch.zeros_like(previous_flow_value)
-            negtive_background_value = torch.zeros_like(background_value)
         num_channels_latents = self.denoising_unet.out_channels
         latents = self.prepare_latents(
             batch_size,
@@ -180,6 +174,7 @@ class SCALEDSFCPipeline(DiffusionPipeline):
                 sheduled_latent = self.scheduler.scale_model_input(
                     latents, t
                 )
+                # import pdb; pdb.set_trace()
                 latent_model_input = torch.cat([previous_flow_value,sheduled_latent],dim=1) # 1x9x32x32x32
                 if do_classifier_free_guidance:
                     negtive_latent_model_input = torch.cat([negtive_previous_flow_value,sheduled_latent],dim=1) # 1x24x32x32x32

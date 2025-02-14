@@ -53,30 +53,17 @@ def log_validation(
         generator = torch.manual_seed(42)
     dataset_len = len(valid_dataset)
     sample_idx = [random.randint(0, dataset_len) for _ in range(1)]
-
-    pipe = SCALEDSFCPipeline(
-        denoising_unet,
-        scheduler=scheduler,
-    )
-    pipe = pipe.to(accelerator.device)
+    
     results = {}
     ori_data, gt_result = valid_dataset[sample_idx[0]]
     previous_value = ori_data.unsqueeze(0).to(accelerator.device)
     next_value = gt_result.unsqueeze(0).to(accelerator.device)
-    pre_particle = pipe(
-        previous_value,
-        num_inference_steps=100,
-        guidance_scale=0,
-        length=20560,
-        generator=generator,
-        return_dict=False,
-    )
+    pre_particle = denoising_unet(previous_value).sample
     results['WithoutBackground'] = {
         "prediction_flow": pre_particle.detach().cpu().numpy()[0],
         "gt_flow": next_value.detach().cpu().numpy()[0],
         "original_flow": previous_value.detach().cpu().numpy()[0]
     }
-    del pipe
     return results
 
 def visualize_with_diff(data_pre, data_gt, data_ori, filename):
@@ -140,11 +127,9 @@ class Net(nn.Module):
     def forward(
             self,
             noisy_latents,
-            timesteps,
     ):
         model_pred = self.denoising_unet(
-        noisy_latents,
-        timesteps,
+        noisy_latents
         ).sample
         return model_pred
 
@@ -228,7 +213,7 @@ def main(cfg):
     train_noise_scheduler = DDIMScheduler(**sched_kwargs)
 
     denoising_unet  = UNet1DsModel(
-        in_channels=4,
+        in_channels=2,
         out_channels=2,
         down_block_types=("DownBlock1D", "DownBlock1D", "DownBlock1D", "DownBlock1D"),
         up_block_types=("UpBlock1D", "UpBlock1D", "UpBlock1D", "UpBlock1D"),
@@ -379,9 +364,8 @@ def main(cfg):
         for step, batch in enumerate(train_dataloader):
             t_data = time.time() - t_data_start
             with accelerator.accumulate(net):
-                data_0 = batch[0].to(weight_dtype)  # [B, 205560,2]
-                data_1 = batch[1].to(weight_dtype)  # [B, 205560,2]
-                noise = torch.rand_like(data_0)
+                data_0 = batch[0].to(weight_dtype)
+                data_1 = batch[1].to(weight_dtype)
 
                 if cfg.noise_offset > 0:
                     noise += cfg.noise_offset * torch.randn(
@@ -390,58 +374,16 @@ def main(cfg):
                     )
                 bsz = data_0.shape[0]
                 # Sample a random timestep for each video
-                timesteps = torch.randint(
-                    0,
-                    train_noise_scheduler.num_train_timesteps,
-                    (bsz,),
-                    device=data_0.device,
-                )
-                timesteps = timesteps.long()
-                noisy_latents = train_noise_scheduler.add_noise(data_1, noise, timesteps)
-                input_latent = torch.cat([data_0,noisy_latents], dim=1) 
-                if train_noise_scheduler.prediction_type == "epsilon":
-                    target = noise
-                elif train_noise_scheduler.prediction_type == "v_prediction":
-                    target = train_noise_scheduler.get_velocity(
-                        data_1, noise, timesteps
-                    )
-                elif train_noise_scheduler.prediction_type == "sample":
-                    target = data_1
-                else:
-                    raise ValueError(
-                        f"Unknown prediction type {train_noise_scheduler.prediction_type}"
-                    )
+                input_latent = data_0
+                target = data_1
 
                 # ---- Forward!!! -----
                 model_pred = net(
-                    input_latent,
-                    timesteps
+                    input_latent
                 )
-                
-                if cfg.snr_gamma == 0:
-                    loss = F.l1_loss(
-                        model_pred.float(), target.float(), reduction="mean"
-                    )
-                else:
-                    snr = compute_snr(train_noise_scheduler, timesteps)
-                    if train_noise_scheduler.config.prediction_type == "v_prediction":
-                        # Velocity objective requires that we add one to SNR values before we divide by them.
-                        snr = snr + 1
-                    mse_loss_weights = (
-                            torch.stack(
-                                [snr, cfg.snr_gamma * torch.ones_like(timesteps)], dim=1
-                            ).min(dim=1)[0]
-                            / snr
-                    )
-                    loss = F.l1_loss(
-                        model_pred.float(), target.float(), reduction="none"
-                    )
-                    loss = (
-                            loss.mean(dim=list(range(1, len(loss.shape))))
-                            * mse_loss_weights
-                    )
-                    loss = loss.mean()
-
+                loss = F.l1_loss(
+                    model_pred.float(), target.float(), reduction="mean"
+                )
                 # Gather the losses across all processes for logging (if we use distributed training).
                 avg_loss = accelerator.gather(loss.repeat(cfg.train_bs)).mean()
                 train_loss += avg_loss.item() / cfg.solver.gradient_accumulation_steps
@@ -527,9 +469,8 @@ def save_checkpoint(model, save_dir, prefix, ckpt_num, total_limit=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default="./config/SCALED_sfc/trainning_stage1.yaml")
+    parser.add_argument("--config", type=str, default="./config/SCALED_sfc/trainning_unet_stage1.yaml")
     args = parser.parse_args()
-
     if args.config[-5:] == ".yaml":
         config = OmegaConf.load(args.config)
     elif args.config[-3:] == ".py":
