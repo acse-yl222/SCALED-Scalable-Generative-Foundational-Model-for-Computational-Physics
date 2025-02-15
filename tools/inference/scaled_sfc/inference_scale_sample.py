@@ -19,7 +19,7 @@ model = UNet1DsModel(
         add_attention=False,
         ).to("cuda")
 
-model.load_state_dict(torch.load("weight_save/scale_sample_sfc/denoising_unet-48000.pth",map_location='cpu'))
+model.load_state_dict(torch.load("weight_save/scale_sample_sfc/denoising_unet-93000.pth",map_location='cpu'))
 
 scheduler = DDIMScheduler(
         num_train_timesteps=1000,
@@ -54,7 +54,7 @@ first_two_colums = np.loadtxt("/lcrc/project/SFC_Transformers/SFC-CAE/csv_data/d
 with torch.no_grad():
         for i in tqdm(range(100)):
                 data0 = pipe(data0,
-                             num_inference_steps=100,
+                             num_inference_steps=1000,
                                 guidance_scale=0,
                                 length=20560,
                                 generator=None,

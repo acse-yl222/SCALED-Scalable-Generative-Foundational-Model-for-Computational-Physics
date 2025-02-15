@@ -61,7 +61,6 @@ def log_validation(
     pipe = pipe.to(accelerator.device)
     results = {}
     ori_data, gt_result = valid_dataset[sample_idx[0]]
-    # import pdb;pdb.set_trace()
     previous_value = ori_data.unsqueeze(0).to(accelerator.device)
     next_value = gt_result.unsqueeze(0).to(accelerator.device)
     pre_particle = pipe(
@@ -150,29 +149,6 @@ class Net(nn.Module):
         return model_pred
 
 
-def compute_snr(noise_scheduler, timesteps):
-    """
-    Computes SNR as per
-    https://github.com/TiankaiHang/Min-SNR-Diffusion-Training/blob/521b624bd70c67cee4bdf49225915f5945a872e3/guided_diffusion/gaussian_diffusion.py#L847-L849
-    """
-    alphas_cumprod = noise_scheduler.alphas_cumprod
-    sqrt_alphas_cumprod = alphas_cumprod ** 0.5
-    sqrt_one_minus_alphas_cumprod = (1.0 - alphas_cumprod) ** 0.5
-    sqrt_alphas_cumprod = sqrt_alphas_cumprod.to(device=timesteps.device)[
-        timesteps
-    ].float()
-    while len(sqrt_alphas_cumprod.shape) < len(timesteps.shape):
-        sqrt_alphas_cumprod = sqrt_alphas_cumprod[..., None]
-    alpha = sqrt_alphas_cumprod.expand(timesteps.shape)
-    sqrt_one_minus_alphas_cumprod = sqrt_one_minus_alphas_cumprod.to(
-        device=timesteps.device
-    )[timesteps].float()
-    while len(sqrt_one_minus_alphas_cumprod.shape) < len(timesteps.shape):
-        sqrt_one_minus_alphas_cumprod = sqrt_one_minus_alphas_cumprod[..., None]
-    sigma = sqrt_one_minus_alphas_cumprod.expand(timesteps.shape)
-    snr = (alpha / sigma) ** 2
-    return snr
-
 def main(cfg):
     kwargs = DistributedDataParallelKwargs(find_unused_parameters=False)
     accelerator = Accelerator(
@@ -216,17 +192,8 @@ def main(cfg):
         raise ValueError(
             f"Do not support weight dtype: {cfg.weight_dtype} during training"
         )
-
-    sched_kwargs = OmegaConf.to_container(cfg.noise_scheduler_kwargs)
-    if cfg.enable_zero_snr:
-        sched_kwargs.update(
-            rescale_betas_zero_snr=True,
-            timestep_spacing="trailing",
-            prediction_type=cfg.prediction_type,
-        )
-    # val_noise_scheduler = DDIMScheduler(**sched_kwargs)
-    sched_kwargs.update({"beta_schedule": "scaled_linear"})
-    train_noise_scheduler = DDIMScheduler(**sched_kwargs)
+    
+    train_noise_scheduler = DDIMScheduler(1000,prediction_type='epsilon')
 
     denoising_unet  = UNet1DsModel(
         in_channels=4,
@@ -259,19 +226,7 @@ def main(cfg):
         )
     else:
         learning_rate = cfg.solver.learning_rate
-
-    # Initialize the optimizer
-    if cfg.solver.use_8bit_adam:
-        try:
-            import bitsandbytes as bnb
-        except ImportError:
-            raise ImportError(
-                "Please install bitsandbytes to use 8-bit Adam. You can do so by running `pip install bitsandbytes`"
-            )
-
-        optimizer_cls = bnb.optim.AdamW8bit
-    else:
-        optimizer_cls = torch.optim.AdamW
+    optimizer_cls = torch.optim.AdamW
 
     trainable_params = list(filter(lambda p: p.requires_grad, net.parameters()))
     logger.info(f"Total trainable params {len(trainable_params)}")
@@ -383,14 +338,7 @@ def main(cfg):
                 data_0 = batch[0].to(weight_dtype)  # [B, 205560,2]
                 data_1 = batch[1].to(weight_dtype)  # [B, 205560,2]
                 noise = torch.rand_like(data_0)
-
-                if cfg.noise_offset > 0:
-                    noise += cfg.noise_offset * torch.randn(
-                        (data_0.shape[0], data_0.shape[1], 1, 1, 1),
-                        device=data_0.device,
-                    )
                 bsz = data_0.shape[0]
-                # Sample a random timestep for each video
                 timesteps = torch.randint(
                     0,
                     train_noise_scheduler.num_train_timesteps,
@@ -423,25 +371,6 @@ def main(cfg):
                 loss = F.mse_loss(
                     model_pred.float(), target.float(), reduction="mean"
                 )
-                # else:
-                #     snr = compute_snr(train_noise_scheduler, timesteps)
-                #     if train_noise_scheduler.config.prediction_type == "v_prediction":
-                #         # Velocity objective requires that we add one to SNR values before we divide by them.
-                #         snr = snr + 1
-                #     mse_loss_weights = (
-                #             torch.stack(
-                #                 [snr, cfg.snr_gamma * torch.ones_like(timesteps)], dim=1
-                #             ).min(dim=1)[0]
-                #             / snr
-                #     )
-                #     loss = F.l1_loss(
-                #         model_pred.float(), target.float(), reduction="none"
-                #     )
-                #     loss = (
-                #             loss.mean(dim=list(range(1, len(loss.shape))))
-                #             * mse_loss_weights
-                #     )
-                #     loss = loss.mean()
 
                 # Gather the losses across all processes for logging (if we use distributed training).
                 avg_loss = accelerator.gather(loss.repeat(cfg.train_bs)).mean()
@@ -528,7 +457,7 @@ def save_checkpoint(model, save_dir, prefix, ckpt_num, total_limit=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default="./config/SCALED_sfc/trainning_scaled_vprediction_stage1.yaml")
+    parser.add_argument("--config", type=str, default="./config/SCALED_sfc/trainning_scaled_vprediction_simplified_stage1.yaml")
     args = parser.parse_args()
 
     if args.config[-5:] == ".yaml":
