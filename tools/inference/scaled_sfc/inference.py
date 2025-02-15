@@ -5,7 +5,7 @@ import torch
 from tqdm import tqdm
 
 
-save_dir = "output"
+save_dir = "output/csv"
 
 model = UNet1DsModel(
         in_channels=2,
@@ -16,14 +16,13 @@ model = UNet1DsModel(
         add_attention=False,
         ).to("cuda")
 
-model.load_state_dict(torch.load("exp_output/sfc_unet_stage1/denoising_unet-56000.pth"))
-
+model.load_state_dict(torch.load("weight_save/denoising_unet-139000.pth"))
 
 train_dataset = SFCDataset(
-        data_dir="/lcrc/project/SFC_Transformers/SFC-CAE/csv_data",
-        data_list=[i for i in range(0, 1000)])
+        data_dir="data/SFC_data_csv",
+        data_list=[i for i in range(3500,3590)])
 
-data0,data1 = train_dataset[900]
+data0,data1 = train_dataset[20]
 data0 = data0.unsqueeze(0).to("cuda")
 data1 = data1.unsqueeze(0).to("cuda")
 
