@@ -418,29 +418,29 @@ def main(cfg):
                     timesteps
                 )
                 
-                if cfg.snr_gamma == 0:
-                    loss = F.l1_loss(
-                        model_pred.float(), target.float(), reduction="mean"
-                    )
-                else:
-                    snr = compute_snr(train_noise_scheduler, timesteps)
-                    if train_noise_scheduler.config.prediction_type == "v_prediction":
-                        # Velocity objective requires that we add one to SNR values before we divide by them.
-                        snr = snr + 1
-                    mse_loss_weights = (
-                            torch.stack(
-                                [snr, cfg.snr_gamma * torch.ones_like(timesteps)], dim=1
-                            ).min(dim=1)[0]
-                            / snr
-                    )
-                    loss = F.l1_loss(
-                        model_pred.float(), target.float(), reduction="none"
-                    )
-                    loss = (
-                            loss.mean(dim=list(range(1, len(loss.shape))))
-                            * mse_loss_weights
-                    )
-                    loss = loss.mean()
+                # if cfg.snr_gamma == 0:
+                loss = F.mse_loss(
+                    model_pred.float(), target.float(), reduction="mean"
+                )
+                # else:
+                #     snr = compute_snr(train_noise_scheduler, timesteps)
+                #     if train_noise_scheduler.config.prediction_type == "v_prediction":
+                #         # Velocity objective requires that we add one to SNR values before we divide by them.
+                #         snr = snr + 1
+                #     mse_loss_weights = (
+                #             torch.stack(
+                #                 [snr, cfg.snr_gamma * torch.ones_like(timesteps)], dim=1
+                #             ).min(dim=1)[0]
+                #             / snr
+                #     )
+                #     loss = F.l1_loss(
+                #         model_pred.float(), target.float(), reduction="none"
+                #     )
+                #     loss = (
+                #             loss.mean(dim=list(range(1, len(loss.shape))))
+                #             * mse_loss_weights
+                #     )
+                #     loss = loss.mean()
 
                 # Gather the losses across all processes for logging (if we use distributed training).
                 avg_loss = accelerator.gather(loss.repeat(cfg.train_bs)).mean()
@@ -527,7 +527,7 @@ def save_checkpoint(model, save_dir, prefix, ckpt_num, total_limit=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default="./config/SCALED_sfc/trainning_stage1.yaml")
+    parser.add_argument("--config", type=str, default="./config/SCALED_sfc/trainning_scaled_epsilon_stage1.yaml")
     args = parser.parse_args()
 
     if args.config[-5:] == ".yaml":

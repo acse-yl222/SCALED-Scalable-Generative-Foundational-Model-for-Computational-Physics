@@ -40,8 +40,8 @@ enable_zero_snr: True
 
 skip_timestep: 50
 seed: 12580
-resume_from_checkpoint: 'latest'
-exp_name: 'sfc_stage1'
+resume_from_checkpoint: ''
+exp_name: 'scaled_epsilon_stage1'
 output_dir: './exp_output'
 
-prediction_type: "v_prediction"
+prediction_type: "epsilon"
