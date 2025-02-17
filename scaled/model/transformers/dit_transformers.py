@@ -137,7 +137,7 @@ class DiTTransformer1DModel(ModelMixin, ConfigMixin):
         self.norm_out = nn.LayerNorm(self.inner_dim, elementwise_affine=False, eps=1e-6)
         self.proj_out_1 = nn.Linear(self.inner_dim, 2 * self.inner_dim)
         self.proj_out_2 = nn.Linear(
-            self.inner_dim, self.config.patch_size * self.config.patch_size * self.out_channels
+            self.inner_dim, self.config.patch_size * self.out_channels
         )
 
     def _set_gradient_checkpointing(self, module, value=False):
@@ -176,6 +176,8 @@ class DiTTransformer1DModel(ModelMixin, ConfigMixin):
             `tuple` where the first element is the sample tensor.
         """
         # 1. Input
+        if timestep==None:
+            timestep = torch.tensor([0]).to(hidden_states.device)
         if class_labels==None:
             class_labels = torch.tensor([0]).to(hidden_states.device)
         length = hidden_states.shape[-1] // self.patch_size
@@ -224,6 +226,7 @@ class DiTTransformer1DModel(ModelMixin, ConfigMixin):
         hidden_states = self.proj_out_2(hidden_states)
 
         # unpatchify
+        # import pdb;pdb.set_trace()
         height = width = int(hidden_states.shape[1] ** 0.5)
         hidden_states = hidden_states.reshape(
             shape=(-1, length, self.patch_size, self.out_channels)
