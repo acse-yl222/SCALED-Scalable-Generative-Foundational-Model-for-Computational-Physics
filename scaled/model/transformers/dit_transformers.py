@@ -20,7 +20,7 @@ from torch import nn
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.utils import is_torch_version, logging
 from diffusers.models.attention import BasicTransformerBlock
-from ..embeddings import PatchEmbed, PatchEmbed3D
+from ..embeddings import PatchEmbed1D,PatchEmbed2D, PatchEmbed3D
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
 
@@ -104,13 +104,11 @@ class DiTTransformer1DModel(ModelMixin, ConfigMixin):
         self.gradient_checkpointing = False
 
         # 2. Initialize the position embedding and transformer blocks.
-        self.height = self.config.sample_size
-        self.width = self.config.sample_size
+        self.length = self.config.sample_size
 
         self.patch_size = self.config.patch_size
-        self.pos_embed = PatchEmbed(
-            height=self.config.sample_size,
-            width=self.config.sample_size,
+        self.pos_embed = PatchEmbed1D(
+            length=self.config.sample_size,
             patch_size=self.config.patch_size,
             in_channels=self.config.in_channels,
             embed_dim=self.inner_dim,
@@ -178,7 +176,9 @@ class DiTTransformer1DModel(ModelMixin, ConfigMixin):
             `tuple` where the first element is the sample tensor.
         """
         # 1. Input
-        height, width = hidden_states.shape[-2] // self.patch_size, hidden_states.shape[-1] // self.patch_size
+        if class_labels==None:
+            class_labels = torch.tensor([0]).to(hidden_states.device)
+        length = hidden_states.shape[-1] // self.patch_size
         hidden_states = self.pos_embed(hidden_states)
 
         # 2. Blocks
@@ -226,11 +226,11 @@ class DiTTransformer1DModel(ModelMixin, ConfigMixin):
         # unpatchify
         height = width = int(hidden_states.shape[1] ** 0.5)
         hidden_states = hidden_states.reshape(
-            shape=(-1, height, width, self.patch_size, self.patch_size, self.out_channels)
+            shape=(-1, length, self.patch_size, self.out_channels)
         )
-        hidden_states = torch.einsum("nhwpqc->nchpwq", hidden_states)
+        hidden_states = torch.einsum("nlpc->nclp", hidden_states)
         output = hidden_states.reshape(
-            shape=(-1, self.out_channels, height * self.patch_size, width * self.patch_size)
+            shape=(-1, self.out_channels, length * self.patch_size)
         )
 
         if not return_dict:

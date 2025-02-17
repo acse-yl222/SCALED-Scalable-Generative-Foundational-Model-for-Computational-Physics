@@ -19,7 +19,7 @@ solver:
   adam_epsilon: 1.0e-8
 
 val:
-  validation_steps: 1000
+  validation_steps: 1
   validation_steps_tuple: []
 
 noise_scheduler_kwargs:
@@ -40,8 +40,8 @@ enable_zero_snr: True
 
 skip_timestep: 50
 seed: 12580
-resume_from_checkpoint: 'latest'
-exp_name: 'scaled_vprediction_stage1'
+resume_from_checkpoint: ''
+exp_name: 'scaledFormer_vprediction_stage1'
 output_dir: './exp_output'
 
 prediction_type: "v_prediction"

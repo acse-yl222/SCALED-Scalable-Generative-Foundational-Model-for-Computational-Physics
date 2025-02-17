@@ -1,5 +1,5 @@
-## SCALED : SCALable gEnerative founDational model for Computational Physics
-In this work, we introduce SCALED, a scalable foundational neural network built upon a diffusion-based generative framework for computational physics.
+## SCALED-SFC : SCALable gEnerative founDational model for Unstructure Mesh Computational Physics 
+
 
 ## Demo demostration
 
@@ -18,3 +18,6 @@ In this work, we introduce SCALED, a scalable foundational neural network built 
 ## Trainning
 
 ## Inference
+
+
+
