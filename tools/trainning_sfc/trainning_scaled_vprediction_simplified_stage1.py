@@ -110,17 +110,17 @@ def visualize_with_diff(data_pre, data_gt, data_ori, filename):
     diff_gt_ori = np.abs(data_gt - data_ori)  # Difference between Ground Truth and Original
     
     ax4 = plt.subplot(gs[2, 0])
-    im4 = ax4.imshow(diff_pre_gt[0], vmin=0, vmax=0.1)
+    im4 = ax4.imshow(diff_pre_gt[1], vmin=0, vmax=0.1)
     ax4.set_title('Diff Pre-GT')
     ax4.axis('off')
     
     ax5 = plt.subplot(gs[2, 1])
-    im5 = ax5.imshow(diff_pre_ori[0], vmin=0, vmax=0.1)
+    im5 = ax5.imshow(diff_pre_ori[1], vmin=0, vmax=0.1)
     ax5.set_title('Diff Pre-Ori')
     ax5.axis('off')
     
     ax6 = plt.subplot(gs[2, 2])
-    im6 = ax6.imshow(diff_gt_ori[0], vmin=0, vmax=0.1)
+    im6 = ax6.imshow(diff_gt_ori[1], vmin=0, vmax=0.1)
     ax6.set_title('Diff GT-Ori')
     ax6.axis('off')
     
@@ -239,10 +239,10 @@ def main(cfg):
     )
 
     train_dataset = SFCDiffusionDataset(
-        data_dir="data/SFC_data_csv",
+        data_dir="data/SFC/SFC_data_csv",
         data_list=[i for i in range(5, 3500)])
     val_dataset  = SFCDiffusionDataset(
-        data_dir="data/SFC_data_csv",
+        data_dir="data/SFC/SFC_data_csv",
         data_list=[i for i in range(3500,3990)])
 
     train_dataloader = torch.utils.data.DataLoader(

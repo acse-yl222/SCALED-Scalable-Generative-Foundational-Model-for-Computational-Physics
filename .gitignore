@@ -7,3 +7,7 @@ result
 weight_save
 *.so
 output
+*.pyc
+__pychache__
+*.png
+exp_out
