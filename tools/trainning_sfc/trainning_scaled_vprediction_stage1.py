@@ -13,7 +13,7 @@ import diffusers
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from scaled.dataset.sfc_dataset import SFCDiffusionDataset
+from scaled.dataset.sfc_dataset import SFCDiffusionDatasetv1
 import torch.utils.checkpoint
 import transformers
 from accelerate import Accelerator
@@ -87,7 +87,7 @@ def visualize_with_diff(data_pre, data_gt, data_ori, filename):
     data_ori = data_ori.reshape((2, 257,80))
     # Create a figure with a larger size and higher resolution
     fig = plt.figure(figsize=(12, 12), dpi=300)  # Adjust figsize to accommodate diff images
-    gs = gridspec.GridSpec(3, 3, width_ratios=[1, 1, 1])  # Add extra row for diff and column for colorbars
+    gs = gridspec.GridSpec(3, 4, width_ratios=[1, 1, 1,0.1])  # Add extra row for diff and column for colorbars
     
     for i in range(2):
         ax1 = plt.subplot(gs[i, 0])
@@ -104,6 +104,16 @@ def visualize_with_diff(data_pre, data_gt, data_ori, filename):
         im3 = ax3.imshow(data_ori[i], vmin=-0.5, vmax=0.5)
         ax3.set_title('Original Data')
         ax3.axis('off')
+
+        # Add colorbars in the 4th column
+        cbar_ax1 = plt.subplot(gs[i, 3])
+        fig.colorbar(im1, cax=cbar_ax1)
+        
+        cbar_ax2 = plt.subplot(gs[i, 3])
+        fig.colorbar(im2, cax=cbar_ax2)
+        
+        cbar_ax3 = plt.subplot(gs[i, 3])
+        fig.colorbar(im3, cax=cbar_ax3)
     
     # Now plot the differences in the 4th row
     diff_pre_gt = np.abs(data_pre - data_gt)  # Difference between Prediction and Ground Truth
@@ -125,6 +135,15 @@ def visualize_with_diff(data_pre, data_gt, data_ori, filename):
     ax6.set_title('Diff GT-Ori')
     ax6.axis('off')
     
+    # Add colorbars for the differences
+    cbar_ax4 = plt.subplot(gs[2, 3])
+    fig.colorbar(im4, cax=cbar_ax4)
+    
+    cbar_ax5 = plt.subplot(gs[2, 3])
+    fig.colorbar(im5, cax=cbar_ax5)
+    
+    cbar_ax6 = plt.subplot(gs[2, 3])
+    fig.colorbar(im6, cax=cbar_ax6)
     plt.tight_layout()
     
     # Save the figure with higher resolution
@@ -283,10 +302,10 @@ def main(cfg):
         eps=cfg.solver.adam_epsilon,
     )
 
-    train_dataset = SFCDiffusionDataset(
+    train_dataset = SFCDiffusionDatasetv1(
         data_dir="data/SFC/SFC_data_csv",
         data_list=[i for i in range(5, 3500)])
-    val_dataset  = SFCDiffusionDataset(
+    val_dataset  = SFCDiffusionDatasetv1(
         data_dir="data/SFC/SFC_data_csv",
         data_list=[i for i in range(3500,3990)])
 
@@ -382,7 +401,7 @@ def main(cfg):
             with accelerator.accumulate(net):
                 data_0 = batch[0].to(weight_dtype)  # [B, 205560,2]
                 data_1 = batch[1].to(weight_dtype)  # [B, 205560,2]
-                noise = torch.rand_like(data_0)
+                noise = torch.rand_like(data_1)
 
                 if cfg.noise_offset > 0:
                     noise += cfg.noise_offset * torch.randn(
@@ -419,29 +438,29 @@ def main(cfg):
                     timesteps
                 )
                 
-                # if cfg.snr_gamma == 0:
-                loss = F.mse_loss(
-                    model_pred.float(), target.float(), reduction="mean"
-                )
-                # else:
-                #     snr = compute_snr(train_noise_scheduler, timesteps)
-                #     if train_noise_scheduler.config.prediction_type == "v_prediction":
-                #         # Velocity objective requires that we add one to SNR values before we divide by them.
-                #         snr = snr + 1
-                #     mse_loss_weights = (
-                #             torch.stack(
-                #                 [snr, cfg.snr_gamma * torch.ones_like(timesteps)], dim=1
-                #             ).min(dim=1)[0]
-                #             / snr
-                #     )
-                #     loss = F.l1_loss(
-                #         model_pred.float(), target.float(), reduction="none"
-                #     )
-                #     loss = (
-                #             loss.mean(dim=list(range(1, len(loss.shape))))
-                #             * mse_loss_weights
-                #     )
-                #     loss = loss.mean()
+                if cfg.snr_gamma == 0:
+                    loss = F.mse_loss(
+                        model_pred.float(), target.float(), reduction="mean"
+                    )
+                else:
+                    snr = compute_snr(train_noise_scheduler, timesteps)
+                    if train_noise_scheduler.config.prediction_type == "v_prediction":
+                        # Velocity objective requires that we add one to SNR values before we divide by them.
+                        snr = snr + 1
+                    mse_loss_weights = (
+                            torch.stack(
+                                [snr, cfg.snr_gamma * torch.ones_like(timesteps)], dim=1
+                            ).min(dim=1)[0]
+                            / snr
+                    )
+                    loss = F.l1_loss(
+                        model_pred.float(), target.float(), reduction="none"
+                    )
+                    loss = (
+                            loss.mean(dim=list(range(1, len(loss.shape))))
+                            * mse_loss_weights
+                    )
+                    loss = loss.mean()
 
                 # Gather the losses across all processes for logging (if we use distributed training).
                 avg_loss = accelerator.gather(loss.repeat(cfg.train_bs)).mean()

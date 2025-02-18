@@ -19,14 +19,14 @@ def get_clean_vtu(filename):
         vtkdata.RemoveArray(array)
     return clean_vtu
 
-for i in tqdm(range(100)):
+for i in tqdm(range(10000)):
     #cwd = os.getcwd()
     # if not os.path.isdir('reconstructed_vtu'):
     #     os.mkdir('reconstructed_vtu')  
     #os.chdir('csv_data') # will overwrite files in results
 
     # csv_data = np.loadtxt(f'/lcrc/project/SFC_Transformers/SFC-CAE/csv_data/data_{i}.csv', delimiter=',')[:,2:]
-    csv_data = np.loadtxt(f'output/csv/data_{i}.csv', delimiter=',')[:,2:]
+    csv_data = np.loadtxt(f'data/SFC/output/csv/data_{i}.csv', delimiter=',')[:,2:]
     
     print('shape csv_data', csv_data.shape)
     csv_data = csv_data.reshape(-1, 20550*2, order='F')
@@ -39,14 +39,14 @@ for i in tqdm(range(100)):
 
     # get clean vtu file - path to original vtu data
     #path = '/home/cheaney/Results/nirom_test_fpc_nPOD_20_nSnap_100/snapshots/'
-    filename = '/lcrc/project/SFC_Transformers/SFC-CAE/data/FPC_Re3900_DG_old/Flowpast_2d_Re3900_0.vtu'
+    filename = 'data_0.vtu'
     clean_vtu = get_clean_vtu(filename)
     velocity = np.zeros((nNodes,2)) # whether 2D or 3D
 
     # for i in range(nExamples):
     new_vtu = vtktools.vtu()
     new_vtu.ugrid.DeepCopy(clean_vtu.ugrid)
-    new_vtu.filename = 'output/vtu/data_' + str(i) + '.vtu'
+    new_vtu.filename = 'data/SFC/output/vtu/data_' + str(i) + '.vtu'
     velocity[:,0:nDim] = csv_data[0,:].reshape((nNodes,nDim),order='F')
     new_vtu.AddField('Velocity_CAE',velocity)
     new_vtu.Write()

@@ -12,7 +12,7 @@ solver:
   lr_scheduler: 'constant'
 
   # optimizer
-  use_8bit_adam: True 
+  use_8bit_adam: False 
   adam_beta1: 0.9
   adam_beta2: 0.999
   adam_weight_decay:  1.0e-2
@@ -41,8 +41,8 @@ enable_zero_snr: True
 
 skip_timestep: 50
 seed: 12580
-resume_from_checkpoint: 'latest'
-exp_name: 'urbanflow_stage2'
+resume_from_checkpoint: ''
+exp_name: 'scaled_urbanflow_stage1'
 output_dir: './exp_output'
 
 prediction_type: "v_prediction"

@@ -11,3 +11,4 @@ output
 __pychache__
 *.png
 exp_out
+*.vtu
