@@ -268,10 +268,10 @@ def main(cfg):
     )
 
     train_dataset = SFCDataset(
-        data_dir="data/SFC_data_csv",
+        data_dir="data/SFC/SFC_data_csv",
         data_list=[i for i in range(5, 3500)])
     val_dataset  = SFCDataset(
-        data_dir="data/SFC_data_csv",
+        data_dir="data/SFC/SFC_data_csv",
         data_list=[i for i in range(3500,3990)])
 
     train_dataloader = torch.utils.data.DataLoader(
