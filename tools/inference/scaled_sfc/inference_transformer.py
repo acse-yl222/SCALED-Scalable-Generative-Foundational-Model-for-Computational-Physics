@@ -4,12 +4,12 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-n = 10000
-save_dir = "data/SFC/output/csv"
+n = 300
+save_dir = "output/csv"
 
 model = DiTTransformer1DModel(in_channels=2,out_channels=2,sample_size=20560,patch_size=16,num_layers=16,attention_head_dim=36).to("cuda")
 
-model.load_state_dict(torch.load("weight_save/denoising_unet-102000.pth"))
+model.load_state_dict(torch.load("weight_save/transformer/denoising_unet-426000.pth"))
 
 
 train_dataset = SFCDataset(
@@ -19,9 +19,7 @@ train_dataset = SFCDataset(
 data0,data1 = train_dataset[20]
 data0 = data0.unsqueeze(0).to("cuda")
 data1 = data1.unsqueeze(0).to("cuda")
-
 first_two_colums = np.loadtxt("data/SFC/SFC_data_csv/data_0.csv", delimiter=",")[:, :2]
-
 
 with torch.no_grad():
         for i in tqdm(range(n)):
